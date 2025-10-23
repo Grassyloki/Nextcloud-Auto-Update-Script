@@ -1,6 +1,6 @@
-# Nextcloud Update Script
+# Nextcloud Auto Update Script 
 
-A bash script to automate Nextcloud updates with version checking, PGP verification, and intelligent handling of active downloads.
+A bash script to automate Nextcloud updates with version checking, PGP verification, and intelligent handling of active downloads. Tested on OpenSuse Tumbleweed Slowroll
 
 ## Features
 
@@ -70,9 +70,7 @@ If active operations are detected, the script waits up to 1 hour before proceedi
 ## Security Notes
 
 - Always verify the PGP key fingerprint matches: `28806A878AE423A28372792ED75899B9A724937A`
-- Review the script before running it with root privileges
 - Keep backups before updating
-- Test on non-production systems first
 
 ## SELinux Support
 
