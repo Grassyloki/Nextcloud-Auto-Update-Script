@@ -101,4 +101,4 @@ MIT
 
 ## Disclaimer
 
-This script is provided as-is. Always maintain backups and test in a non-production environment first. The author is not responsible for any data loss or system issues.
+This script is provided as-is. Always maintain backups and test in a non-production environment first. Im not responsible for any data loss or system issues.
