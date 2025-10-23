@@ -21,6 +21,12 @@ OVERRIDE_SESSION_DIR=""
 # Path to Nextcloud config.php (relative to NEXTCLOUD_ROOT)
 CONFIG_PATH="config/config.php"
 
+# Enable additional features (set to true if you use these features)
+ENABLE_LDAP=false              # Set true if using user_ldap app
+ENABLE_EXTERNAL_STORAGE=true   # Set true if using files_external with SMB/CIFS
+ENABLE_SENDMAIL=true           # Set true if using email notifications
+ENABLE_APP_API=true            # Set true if using app_api (external apps/Docker)
+
 # ============================================================================
 
 echo "=== Nextcloud SELinux Configuration Script ==="
@@ -247,6 +253,19 @@ else
     semanage fcontext -a -t httpd_sys_rw_content_t "${DATA_DIR}(/.*)?"
 fi
 
+# Additional app-specific directories that need write access
+echo "Adding contexts for app-specific directories..."
+
+# Temporary upload directory
+if [[ -d "${NEXTCLOUD_ROOT}/tmp" ]]; then
+    semanage fcontext -a -t httpd_sys_rw_content_t "${NEXTCLOUD_ROOT}/tmp(/.*)?" 2>/dev/null || true
+fi
+
+# Custom apps directory (if exists)
+if [[ -d "${NEXTCLOUD_ROOT}/custom_apps" ]]; then
+    semanage fcontext -a -t httpd_sys_rw_content_t "${NEXTCLOUD_ROOT}/custom_apps(/.*)?" 2>/dev/null || true
+fi
+
 echo
 echo "=== Step 4: Applying contexts ==="
 restorecon -Rv "${NEXTCLOUD_ROOT}/"
@@ -263,16 +282,17 @@ restorecon -Rv "${PHP_SESSION_DIR}"
 
 echo
 echo "=== Step 6: Setting SELinux booleans ==="
-echo "Enabling httpd_unified..."
+
+echo "Enabling httpd_unified (allows httpd to access all content)..."
 setsebool -P httpd_unified on
 
-echo "Enabling httpd_can_network_connect..."
+echo "Enabling httpd_can_network_connect (required for external integrations, Talk, Mail, etc.)..."
 setsebool -P httpd_can_network_connect on
 
-echo "Enabling httpd_can_network_memcache..."
+echo "Enabling httpd_can_network_memcache (required for Redis/Memcached)..."
 setsebool -P httpd_can_network_memcache on
 
-echo "Enabling httpd_execmem for PHP-FPM..."
+echo "Enabling httpd_execmem (required for PHP-FPM and some apps)..."
 setsebool -P httpd_execmem on
 
 # Check if data directory is on NFS
@@ -284,6 +304,37 @@ if df -T "$DATA_DIR" 2>/dev/null | grep -q nfs; then
     echo "Enabling httpd_anon_write for NFS write access..."
     setsebool -P httpd_anon_write on
 fi
+
+# Conditional booleans based on enabled features
+if [[ "$ENABLE_LDAP" == true ]]; then
+    echo "Enabling httpd_can_connect_ldap (for LDAP authentication)..."
+    setsebool -P httpd_can_connect_ldap on
+fi
+
+if [[ "$ENABLE_EXTERNAL_STORAGE" == true ]]; then
+    echo "Enabling httpd_use_cifs (for SMB/CIFS external storage)..."
+    setsebool -P httpd_use_cifs on
+    
+    echo "Enabling httpd_use_fusefs (for FUSE-based external storage)..."
+    setsebool -P httpd_use_fusefs on 2>/dev/null || echo "Note: httpd_use_fusefs not available on this system"
+fi
+
+if [[ "$ENABLE_SENDMAIL" == true ]]; then
+    echo "Enabling httpd_can_sendmail (for email notifications)..."
+    setsebool -P httpd_can_sendmail on
+fi
+
+if [[ "$ENABLE_APP_API" == true ]]; then
+    echo "Enabling httpd_can_network_relay (for app_api Docker communication)..."
+    setsebool -P httpd_can_network_relay on 2>/dev/null || echo "Note: httpd_can_network_relay not available on this system"
+fi
+
+# Additional useful booleans
+echo "Enabling httpd_setrlimit (allows setting resource limits)..."
+setsebool -P httpd_setrlimit on 2>/dev/null || echo "Note: httpd_setrlimit not available on this system"
+
+echo "Enabling httpd_tmp_exec (allows executing scripts from tmp)..."
+setsebool -P httpd_tmp_exec on 2>/dev/null || echo "Note: httpd_tmp_exec not available on this system"
 
 echo
 echo "=== Step 7: Verifying contexts ==="
@@ -303,19 +354,33 @@ echo "PHP session directory:"
 ls -dZ "$PHP_SESSION_DIR" | grep httpd_sys_rw_content_t || echo "WARNING: Incorrect context!"
 
 echo
-echo "=== Step 8: Restarting services ==="
+echo "=== Step 8: Checking for SELinux denials ==="
+echo "Recent SELinux denials (last 10 minutes):"
+ausearch -m avc,user_avc,selinux_err -ts recent -i 2>/dev/null | tail -20 || echo "No recent denials found or ausearch not available"
+
+echo
+echo "=== Step 9: Restarting services ==="
 systemctl restart nginx
 systemctl restart php-fpm
 
 echo
 echo "=== Configuration complete! ==="
 echo
-echo "To check for any remaining SELinux denials, run:"
-echo "  ausearch -m avc,user_avc,selinux_err,user_selinux_err -ts recent"
-echo
-echo "If you still see denials, you may need to create a custom policy module."
-echo
 echo "Configuration used:"
 echo "  Nextcloud root: $NEXTCLOUD_ROOT"
 echo "  Data directory: $DATA_DIR"
 echo "  PHP session: $PHP_SESSION_DIR"
+echo
+echo "Enabled features:"
+echo "  LDAP: $ENABLE_LDAP"
+echo "  External Storage (SMB/CIFS): $ENABLE_EXTERNAL_STORAGE"
+echo "  Sendmail: $ENABLE_SENDMAIL"
+echo "  App API: $ENABLE_APP_API"
+echo
+echo "To check for any remaining SELinux denials, run:"
+echo "  ausearch -m avc,user_avc,selinux_err,user_selinux_err -ts recent"
+echo
+echo "If you still see denials after using Nextcloud for a while, you may need to:"
+echo "  1. Generate a custom policy module with: audit2allow -a -M nextcloud_custom"
+echo "  2. Review the policy: cat nextcloud_custom.te"
+echo "  3. Apply it if safe: semodule -i nextcloud_custom.pp"
